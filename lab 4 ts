@@ -1,0 +1,216 @@
+// ===== Types =====
+type Filter = "all" | "active" | "completed";
+
+// ===== Todo class (template for one todo) =====
+class Todo {
+  id: number;
+  text: string;
+  done: boolean;
+
+  constructor(id: number, text: string, done: boolean = false) {
+    this.id = id;
+    this.text = text;
+    this.done = done;
+  }
+}
+
+// ===== TodoApp class (holds the logic) =====
+class TodoApp {
+  private todos: Todo[] = [];
+  private filter: Filter = "all";
+  private nextId: number = 1;
+  private onChange: () => void; // callback: runs after every change
+
+  constructor(onChange: () => void) {
+    this.onChange = onChange;
+  }
+
+  // Getters
+  get currentFilter(): Filter {
+    return this.filter;
+  }
+
+  get itemsLeft(): number {
+    return this.todos.filter((t) => !t.done).length;
+  }
+
+  get visibleTodos(): Todo[] {
+    if (this.filter === "active") return this.todos.filter((t) => !t.done);
+    if (this.filter === "completed") return this.todos.filter((t) => t.done);
+    return [...this.todos]; // spread: copy of the array
+  }
+
+  // Actions
+  add(text: string): void {
+    const clean = text.trim();
+    if (!clean) return;
+    this.todos = [...this.todos, new Todo(this.nextId++, clean)];
+    this.onChange();
+  }
+
+  toggle(id: number): void {
+    this.todos = this.todos.map((t) =>
+      t.id === id ? new Todo(t.id, t.text, !t.done) : t
+    );
+    this.onChange();
+  }
+
+  edit(id: number, newText: string): void {
+    const clean = newText.trim();
+    if (!clean) {
+      this.remove(id); // empty text = delete the todo
+      return;
+    }
+    this.todos = this.todos.map((t) =>
+      t.id === id ? new Todo(t.id, clean, t.done) : t
+    );
+    this.onChange();
+  }
+
+  remove(id: number): void {
+    this.todos = this.todos.filter((t) => t.id !== id);
+    this.onChange();
+  }
+
+  clearCompleted(): void {
+    this.todos = this.todos.filter((t) => !t.done);
+    this.onChange();
+  }
+
+  clearAll(): void {
+    this.todos = [];
+    this.onChange();
+  }
+
+  setFilter(filter: Filter): void {
+    this.filter = filter;
+    this.onChange();
+  }
+}
+
+// ===== DOM elements =====
+const input = document.getElementById("todoInput") as HTMLInputElement;
+const addBtn = document.getElementById("addBtn") as HTMLButtonElement;
+const list = document.getElementById("todoList") as HTMLUListElement;
+const count = document.getElementById("count") as HTMLSpanElement;
+const clearCompletedBtn = document.getElementById("clearCompleted") as HTMLButtonElement;
+const clearAllBtn = document.getElementById("clearAll") as HTMLButtonElement;
+const filterButtons = document.querySelectorAll<HTMLButtonElement>(".filter");
+
+// render is passed as a callback, so the page updates after every change
+const app = new TodoApp(render);
+
+// ===== Render =====
+function render(): void {
+  list.innerHTML = "";
+
+  const todos = app.visibleTodos;
+  if (todos.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "empty";
+    empty.textContent = "Nothing here yet.";
+    list.appendChild(empty);
+  }
+
+  todos.forEach(({ id, text, done }) => { // object destructuring
+    const li = document.createElement("li");
+    li.className = done ? "todo done" : "todo";
+    li.dataset.id = String(id);
+
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.className = "toggle";
+    box.checked = done;
+
+    const span = document.createElement("span");
+    span.className = "text";
+    span.textContent = text;
+
+    const del = document.createElement("button");
+    del.className = "delete";
+    del.title = "Delete";
+    del.textContent = "🗑";
+
+    li.append(box, span, del);
+    list.appendChild(li);
+  });
+
+  const left = app.itemsLeft;
+  count.textContent = `${left} item${left === 1 ? "" : "s"} left`;
+
+  filterButtons.forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.filter === app.currentFilter);
+  });
+}
+
+// ===== Helper: get the todo id from a clicked element =====
+function getId(target: HTMLElement): number | null {
+  const li = target.closest("li");
+  if (!li || !li.dataset.id) return null;
+  return Number(li.dataset.id);
+}
+
+// ===== Events =====
+function addTodo(): void {
+  app.add(input.value);
+  input.value = "";
+  input.focus();
+}
+
+addBtn.addEventListener("click", addTodo);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") addTodo();
+});
+
+// Event delegation: one listener on the list handles all items
+list.addEventListener("click", (e) => {
+  const target = e.target as HTMLElement;
+  const id = getId(target);
+  if (id === null) return;
+
+  if (target.classList.contains("toggle")) app.toggle(id);
+  if (target.classList.contains("delete")) app.remove(id);
+});
+
+// Double-click to edit, Enter to save, Escape to cancel
+list.addEventListener("dblclick", (e) => {
+  const target = e.target as HTMLElement;
+  if (!target.classList.contains("text")) return;
+
+  const id = getId(target);
+  const li = target.closest("li");
+  if (id === null || !li) return;
+
+  const editor = document.createElement("input");
+  editor.className = "edit";
+  editor.value = target.textContent ?? "";
+  li.replaceChild(editor, target);
+  editor.focus();
+  editor.select();
+
+  let finished = false;
+  const finish = (save: boolean): void => {
+    if (finished) return;
+    finished = true;
+    if (save) app.edit(id, editor.value);
+    else render();
+  };
+
+  editor.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter") finish(true);
+    if (ev.key === "Escape") finish(false);
+  });
+  editor.addEventListener("blur", () => finish(true));
+});
+
+filterButtons.forEach((btn) => {
+  btn.addEventListener("click", () => {
+    app.setFilter(btn.dataset.filter as Filter);
+  });
+});
+
+clearCompletedBtn.addEventListener("click", () => app.clearCompleted());
+clearAllBtn.addEventListener("click", () => app.clearAll());
+
+// First render
+render();
